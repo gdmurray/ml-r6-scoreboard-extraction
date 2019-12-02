@@ -1,21 +1,31 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request, jsonify
 import keras.backend.tensorflow_backend as tb
-from keras.models import model_from_json
+from filtering.functions import load_model
+from filtering.ml import load_label_maps
 from urllib.parse import quote
 from sklearn.preprocessing import LabelBinarizer
 import redis
+import json
+import os
 from PIL import Image
+
 
 import base64
 
 tb._SYMBOLIC_SCOPE.value = True
-from PIL import Image
-import os
 import numpy as np
+
+score_labels, SCORE_LABEL_MAP, SCORE_BINARY_MAP = load_label_maps(home_dir="filtering/")
+labels = sorted(["casters", "in_game", "map_ban", "operator_ban", "operator_select", "other", "scoreboard"])
+encoder = LabelBinarizer()
+binarized = encoder.fit_transform(labels)
+LABEL_MAP = {labels[i]: value for i, value in enumerate(binarized)}
+BINARY_MAP = {"".join(list(map(str, value))): key for key, value in LABEL_MAP.items()}
 
 DIR = "/home/ubuntu/data"
 app = Flask(__name__)
 r = redis.Redis(host='localhost')
+
 
 IMG_WIDTH = int(1280 / 2)
 IMG_HEIGHT = int(720 / 2)
@@ -23,28 +33,11 @@ IMG_HEIGHT = int(720 / 2)
 RESIZED_WIDTH = int(1280 / 5)
 RESIZED_HEIGHT = int(720 / 5)
 
-labels = sorted(["casters", "in_game", "map_ban", "operator_ban", "operator_select", "other", "scoreboard"])
-encoder = LabelBinarizer()
-binarized = encoder.fit_transform(labels)
-LABEL_MAP = {labels[i]: value for i, value in enumerate(binarized)}
-BINARY_MAP = {"".join(list(map(str, value))): key for key, value in LABEL_MAP.items()}
-
-
-def load_model():
-    json_file = open('model.json', 'r')
-    loaded_model_json = json_file.read()
-    json_file.close()
-    loaded_model = model_from_json(loaded_model_json)
-    # load weights into new model
-    loaded_model.load_weights("model.h5")
-    print("Loaded model from disk")
-    print("Compiling model")
-    loaded_model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-    return loaded_model
-
-
+frame_model = load_model(model_name="model", dir="parser/")
 model = load_model()
 print("Model Loaded")
+exp_model = load_model(model_name="exp_model")
+print("Experimental Model Loaded")
 
 
 @app.route("/ping")
@@ -52,25 +45,33 @@ def pong():
     return "pong"
 
 
-@app.route("/")
-def main():
-    data = {"_".join([c for c in d.split(" ")]): d for d in os.listdir(DIR)}
-    return render_template("main.html", data=data)
 
+@app.route("/predict")
+def get_scoreboards():
+    image_b64 = base64.urlsafe_b64decode(request.args.get('image'))
+    exp_b64 = base64.urlsafe_b64decode(request.args.get("exp"))
+    print(len(image_b64))
+    model_array = np.frombuffer(image_b64, dtype=np.float64).reshape(50, 150)
+    model_array = model_array.reshape(-1, 50, 150, 1)
 
-@app.route("/data/<folder>")
-def data_view(folder):
-    folder_ = folder
-    folder = " ".join([c for c in folder.split("_")])
-    if not os.path.exists(f"{DIR}/{folder}/thumbnail"):
-        os.mkdir(f"{DIR}/{folder}/thumbnail")
-    items = os.listdir(f"{DIR}/{folder}")
-    return render_template("data.html", folder_=folder_, folder=folder, num_items=len(items))
+    exp_array = np.frombuffer(exp_b64, dtype=np.float64)
+    exp_array = exp_array.reshape([-1, 6, 1])
 
+    model_prediction = model.predict(model_array)
+    exp_model_prediction = exp_model.predict(exp_array)
 
-@app.route("/predict/<folder>/scoreboards")
-def get_scoreboards(folder):
-    pass
+    exp_prediction_string = "".join(['1' if (m == np.argmax(exp_model_prediction[0])) else '0' for m, num in
+                                     enumerate(exp_model_prediction[0])])
+    exp_prediction = SCORE_BINARY_MAP[exp_prediction_string]
+
+    # prediction = model.predict([processed_img, np.array([i])])
+    prediction_string = "".join([str(int(round(num, 0))) for num in model_prediction[0]])
+    if prediction_string == "00000":
+        prediction_string = "".join(['1' if (m == np.argmax(model_prediction[0])) else '0' for m, num in
+                                     enumerate(model_prediction[0])])
+
+    prediction = SCORE_BINARY_MAP[prediction_string]
+    return jsonify({"prediction": str(prediction), "exp_prediction": str(exp_prediction)})
 
 
 @app.route("/predict/<folder>/<image>")
@@ -110,9 +111,12 @@ def get_prediction(folder, image):
             img = img_f.convert('L')
             img = img.resize((IMG_HEIGHT, IMG_WIDTH), Image.ANTIALIAS)
             img_array = np.array(img).reshape(-1, IMG_HEIGHT, IMG_WIDTH, 1)
-            prediction = model.predict(img_array)
+            prediction = frame_model.predict(img_array)
             pred = [int(round(m, 0)) for m in prediction[0]]
             key = "".join(list(map(str, pred)))
+        if key == "0000000":
+            key = "".join(['1' if (m == np.argmax(prediction[0])) else '0' for m, num in
+                           enumerate(prediction[0])])
         final_prediction = BINARY_MAP[key]
         if use_redis:
             r.set(cache_key, final_prediction)

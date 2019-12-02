@@ -20,7 +20,7 @@ def clean_edge_cases(image, path):
 
 MIN_HEIGHT = 10
 valid = []
-for file in ['frame_1545.jpg']:  # os.listdir("sample/"):
+for file in ['frame.jpg']:  # os.listdir("sample/"):
     print(file)
     img = cv2.imread(f"out/{file.split('.')[0]}/final_scoreboard.jpg", 0)
     folder_dir = f"proc_out/{file.split('.')[0]}"

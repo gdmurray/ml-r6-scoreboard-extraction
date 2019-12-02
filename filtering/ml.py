@@ -49,12 +49,12 @@ def freeze_session(session, keep_var_names=None, output_names=None, clear_device
         return frozen_graph
 
 
-def load_label_maps(home_dir="."):
+def load_label_maps(home_dir="./"):
     """
 
     :return: (labels, LABELS_MAP, BINARY_MAP)
     """
-    labels = sorted([label for label in os.listdir("training/") if (label != ".DS_Store")])
+    labels = sorted([label for label in os.listdir(f"{home_dir}training/") if (label != ".DS_Store")])
     LABEL_MAP = pickle.load(open(f"{home_dir}/label_map.pkl", 'rb'))
     BINARY_MAP = pickle.load(open(f"{home_dir}/binary_map.pkl", 'rb'))
     return labels, LABEL_MAP, BINARY_MAP
@@ -111,8 +111,8 @@ def get_exp_datasets():
     training_dataset = []
     testing_dataset = []
     labels, LABEL_MAP, _ = load_label_maps()
-    training_df = pd.read_csv("../training_remapped.csv")
-    testing_df = pd.read_csv("../testing_remapped.csv")
+    training_df = pd.read_csv("./training_remapped.csv")
+    testing_df = pd.read_csv("./testing_remapped.csv")
     for i, label in enumerate(labels):
         for j, file in enumerate(os.listdir(f"experimental/training/{label}")):
             if file != ".DS_Store":
@@ -150,12 +150,12 @@ def experimental_train():
     model.fit(training_data, training_labels, epochs=10, batch_size=16)
     acc = model.evaluate(testing_data, testing_labels, batch_size=16, verbose=1)
     print(acc)
-    model_json = model.to_json()
-    with open("exp_model.json", "w") as json_file:
-        json_file.write(model_json)
+    # model_json = model.to_json()
+    # with open("exp_model.json", "w") as json_file:
+    #    json_file.write(model_json)
     # serialize weights to HDF5
-    model.save_weights("exp_model.h5")
-    print("Saved model to disk")
+    # model.save_weights("exp_model.h5")
+    # print("Saved model to disk")
     return model
 
 
@@ -203,10 +203,10 @@ def train():
     #                             output_names=[out.op.name for out in model.outputs])
     # tf.io.write_graph(frozen_graph, "../goserver/models/model", "model.pb", as_text=False)
 
-    if os.path.exists("../goserver/models/model"):
-        rmtree("../goserver/models/model")
-    from filtering.create_go_model import export_model_to_pb
-    export_model_to_pb(model, "../goserver/models/model")
+    # if os.path.exists("../goserver/models/model"):
+    #    rmtree("../goserver/models/model")
+    # from filtering.create_go_model import export_model_to_pb
+    # export_model_to_pb(model, "../goserver/models/model")
     # model.save('model.h5')
 
     # serialize model to JSON
@@ -218,11 +218,9 @@ def train():
     # print("Saved model to disk")
 
 
-train()
 # build_and_save_labels()
 # train()
-# experimental_train()
-
+experimental_train()
 
 #####################
 # Deprecated Layers #

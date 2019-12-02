@@ -17,7 +17,11 @@ pyserver/data
 */experimental
 */venv
 venv
-
+text_processing
+scoreboard/cache
+scoreboard/out
+proc_out
+out
 __pycache__
 */__pycache__
 *.pyc

@@ -12,8 +12,8 @@ RUN  apt-get update && apt-get install -y python-dev python-numpy \
   libatlas-base-dev gfortran webp qt5-default libvtk6-dev zlib1g-dev
 
 ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr
-RUN wget -O eng.traineddata https://github.com/tesseract-ocr/tessdata_best/raw/master/eng.traineddata &&\
-    mv eng.traineddata /usr/share/tesseract-ocr
+RUN wget -O eng_best.traineddata https://github.com/tesseract-ocr/tessdata_best/raw/master/eng.traineddata &&\
+    mv eng_best.traineddata /usr/share/tesseract-ocr
 RUN pip3 install numpy
 
 RUN apt-get install -y python-pip

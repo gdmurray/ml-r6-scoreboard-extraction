@@ -2,17 +2,17 @@ from keras.models import model_from_json
 import math
 import cv2
 
-from filtering.constants import IMAGE_HEIGHT, IMAGE_WIDTH
+IMAGE_HEIGHT = 50
+IMAGE_WIDTH = 150
 
-
-def load_model(model_name="model"):
+def load_model(model_name="model", dir="filtering/"):
     print(f"Loading model: {model_name}")
-    json_file = open(f"filtering/{model_name}.json", 'r')
+    json_file = open(f"{dir}{model_name}.json", 'r')
     loaded_model_json = json_file.read()
     json_file.close()
     loaded_model = model_from_json(loaded_model_json)
     # load weights into new model
-    loaded_model.load_weights(f"filtering/{model_name}.h5")
+    loaded_model.load_weights(f"{dir}{model_name}.h5")
     print("Loaded model from disk... Compiling")
     loaded_model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
     return loaded_model

@@ -1,12 +1,19 @@
 import cv2
+import base64
 import pickle
 import os
 import csv
+import requests
+import concurrent.futures
+import json
 import math
 import copy
+from pytesseract import image_to_data
 import time
 import numpy as np
+import pandas as pd
 from collections import defaultdict, Counter
+from filtering.functions import resize_image
 
 
 class Processor:
@@ -14,12 +21,13 @@ class Processor:
     TEXT_LIST = ['text1', 'text2', 'text3', 'text4']
     CSV_HEADERS = ['num', 'text1', 'text2', 'text3', 'text4', 'classification', "exp_classification"]
 
-    def __init__(self, image, image_name, cache=False):
+    def __init__(self, image, image_name, cache=True):
         self.root_image = image
         self.image_name = image_name
-        self.cache_folder = f"/home/ubuntu/app/scoreboard/.cache/{image_name}"
-        self.out_folder = f"/home/ubuntu/app/scoreboard/out/{image_name}"
+        self.cache_folder = f"scoreboard/cache/{image_name.split('.')[0]}"
+        self.out_folder = f"scoreboard/out/{image_name.split('.')[0]}"
         self.cache = cache
+        self.init_folders()
 
     def init_folders(self):
         if not os.path.exists(self.cache_folder):
@@ -29,12 +37,10 @@ class Processor:
             os.mkdir(self.out_folder)
 
     def extract_scoreboard_box(self, image=None):
-        if not image:
-            img = self.root_image
-        else:
-            img = image
+        img = self.root_image
         cache_dir = f"{self.cache_folder}/extract"
 
+        print("Thresholding Image")
         th1 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
         th1 = 255 - th1
 
@@ -66,7 +72,7 @@ class Processor:
         if self.cache: cv2.imwrite(f"{cache_dir}/img_final_bin.jpg", img_final_bin)
 
         # Fetch Contours from Image
-
+        print("Fetching Contours Image")
         contours, _ = cv2.findContours(img_final_bin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         first_contour_img = np.zeros([img.shape[0], img.shape[1]], dtype=np.uint8)
         first_contour_img.fill(255)
@@ -99,7 +105,8 @@ class Processor:
         (thresh, img_final_bin_pass2) = cv2.threshold(img_final_bin_pass2, 128, 255,
                                                       cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 
-        if self.cache: cv2.imwrite(f"{cache_dir}/img_final_bin_pass2.jpg", img_final_bin_pass2)
+        if self.cache:
+            cv2.imwrite(f"{cache_dir}/img_final_bin_pass2.jpg", img_final_bin_pass2)
 
         # Get Contours from Second Pass on Image
         contours_pass2, _ = cv2.findContours(img_final_bin_pass2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -120,8 +127,10 @@ class Processor:
             x, y = corn.ravel()
             cv2.circle(validation_img, (x, y), 5, (0, 255, 0), -1)
 
-        if self.cache: cv2.imwrite(f"{cache_dir}/corners.jpg", validation_img)
-        if self.cache: cv2.imwrite(f"{cache_dir}/edges.jpg", edges)
+        if self.cache:
+            cv2.imwrite(f"{cache_dir}/corners.jpg", validation_img)
+        if self.cache:
+            cv2.imwrite(f"{cache_dir}/edges.jpg", edges)
 
         # Extract Hough Lines from Image (detectable lines)
         lines = cv2.HoughLines(edges, 1, np.pi / 180, 50)
@@ -158,7 +167,8 @@ class Processor:
                             cv2.line(validation_img, (x1, y1), (x2, y2), (0, 0, 255), 2)
                             vertical_lines.append([(x1, y1), (x2, y2)])
 
-        if self.cache: cv2.imwrite(f"{cache_dir}/houghlines.jpg", validation_img)
+        if self.cache:
+            cv2.imwrite(f"{cache_dir}/houghlines.jpg", validation_img)
 
         # Init Empty image for bounding boxes
         bounding_box = np.zeros([img.shape[0], img.shape[1]], dtype=np.uint8)
@@ -176,7 +186,8 @@ class Processor:
         x, y, w, h = cv2.boundingRect(approx)
 
         cv2.rectangle(bounding_box, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        if self.cache: cv2.imwrite(f"{cache_dir}/bounding_box.jpg", bounding_box)
+        if self.cache:
+            cv2.imwrite(f"{cache_dir}/bounding_box.jpg", bounding_box)
 
         # Sort by corner lines to restrict the bounds of the box
         sorted_horizontal_lines = sorted(horizontal_lines, key=lambda x: x[1][1])
@@ -208,15 +219,20 @@ class Processor:
         final_bounds_img.fill(255)
 
         cv2.rectangle(final_bounds_img, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        if self.cache: cv2.imwrite(f"{cache_dir}/final_bounds.jpg", final_bounds_img)
+        if self.cache:
+            cv2.imwrite(f"{cache_dir}/final_bounds.jpg", final_bounds_img)
 
         cropped = img[y:y + h, x:x + w]
-        if self.cache: cv2.imwrite(f"{cache_dir}/extracted_scoreboard.jpg", cropped)
-        cv2.imwrite(f"{self.out_folder}/extracted_scoreboard.jpg", cropped)
+        if self.cache:
+            cv2.imwrite(f"{cache_dir}/extracted_scoreboard.jpg", cropped)
+
+        if not os.path.exists(f"{self.out_folder}/scoreboard"):
+            os.mkdir(f"{self.out_folder}/scoreboard")
+        cv2.imwrite(f"{self.out_folder}/scoreboard/extracted_scoreboard.jpg", cropped)
 
         return cropped
 
-    def processing(self, img):
+    def extract_scorelines(self, img):
         cache_dir = f"{self.cache_folder}/process"
 
         cv2.imwrite(f"{cache_dir}/original.jpg", img)
@@ -295,7 +311,7 @@ class Processor:
                         ct += 1
                         cv2.line(houghlines_img, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
-        if self.cache: cv2.imwrite(f"{cache_dir}/houghlines.jpg", empty_img)
+        if self.cache: cv2.imwrite(f"{cache_dir}/houghlines.jpg", houghlines_img)
 
         w_counter = Counter()
         h_counter = Counter()
@@ -324,13 +340,13 @@ class Processor:
         prev = height_list[0]
 
         # find common height and use that as player line baseline
-        while i < len(height_list):
+        while i < len(height_list) - 1:
             if height_list[i] > self.MIN_SCORELINE_HEIGHT:
                 if abs(height_list[i] - height_list[i + 1]) <= 2:
                     j = i
                     rng = [height_list[j]]
                     # While the difference between continuous height boxes are <= 2
-                    while (j < len(height_list) - 1) and abs(height_list[j] - h_list[j + 1]) <= 2:
+                    while (j < len(height_list) - 1) and abs(height_list[j] - height_list[j + 1]) <= 2:
                         rng.append(height_list[j + 1])
                         j += 1
                     ranges.append(rng)
@@ -419,7 +435,7 @@ class Processor:
 
         # Sort Scorelines by Y location to get accurate positioning
         for rect_idx, final in enumerate(sorted(final_rects, key=lambda x: x[1])):
-            score_folder = self.out_folder + "/score_" + rect_idx
+            score_folder = self.out_folder + f"/score_{rect_idx}"
             if not os.path.exists(score_folder):
                 os.makedirs(score_folder)
 
@@ -437,12 +453,24 @@ class Processor:
         if self.cache: cv2.imwrite(f"{cache_dir}/final_rect.jpg", final_rect_image)
 
     def extract_scores(self):
+        prediction_dict = {
+            "file": self.image_name,
+            "scores": []
+        }
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            scores = sorted([score for score in os.listdir(f"{self.out_folder}") if score != "scoreboard"])
+
+            args = (score_idx for score_idx in range(0, len(scores)))
+            for result in executor.map(self.process_scoreline, args):
+                print(result)
+                # prediction_dict["scores"].append(result)
+        # json.dump(prediction_dict, open(f"{self.out_folder}/scoreboard/text.json", "w"))
 
     def process_scoreline(self, score_idx):
+        os.environ['TESSDATA_PREFIX'] = "/usr/share/tesseract-ocr"
+        if not os.path.exists(self.cache_folder + "/textraction"):
+            os.mkdir(self.cache_folder + "/textraction")
         cache_dir = self.cache_folder + "/textraction"
-        LABEL_MAP = pickle.load(open("filtering/label_map.pkl", 'rb'))
-        BINARY_MAP = pickle.load(open("filtering/binary_map.pkl", 'rb'))
-
         text_img_map = {text: cv2.imread(f"{self.out_folder}/score_{score_idx}/text/{text}.jpg", 0) for text in
                         self.TEXT_LIST}
 
@@ -459,7 +487,8 @@ class Processor:
         rect_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         dilation = cv2.dilate(img, rect_kernel, iterations=1)
 
-        if self.cache: cv2.imwrite(f"{cache_dir}/dilation_{score_name}.jpg", dilation)
+        if self.cache:
+            cv2.imwrite(f"{cache_dir}/dilation_{score_name}.jpg", dilation)
 
         contours, hierarchy = cv2.findContours(dilation, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
@@ -524,6 +553,7 @@ class Processor:
         text_writer = csv.writer(text_file)
         conf_writer = csv.writer(confidence_file)
 
+        print(f"Found Contours: {len(contours)}")
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
 
@@ -532,37 +562,27 @@ class Processor:
                 conf_table.append([i, ])
                 text2_img_og = text_img_map['text2']
                 text2_img = text2_img_og[y:y + h, x:x + w]
-                rsz = resize_image(text2_img)
-                np.savetxt("out2.txt", rsz)
-                processed_img = np.array(rsz).reshape(-1, IMAGE_HEIGHT, IMAGE_WIDTH, 1)
+                resized = np.array(resize_image(text2_img), dtype=np.float64)
+                exp_array = Processor.get_exp_params(x, y, w, h, text2_img_og, text2_img, i).astype(np.float64)
 
-                print(processed_img[0])
+                image_param = base64.urlsafe_b64encode(resized.tobytes()).decode('utf-8')
+                exp_param = base64.urlsafe_b64encode(exp_array.tobytes()).decode('utf-8')
 
-                print(processed_img)
-                print(processed_img.shape)
-                # model_prediction = model.predict(processed_img)
-                model_prediction = [[0, 0, 1, 0, 0]]
+                url = f"http://localhost/predict?image={image_param}&exp={exp_param}"
+                response = requests.get(url)
+                print(response.text)
+                response_data = response.json()
+                # print(response.content, response.text)
 
-                # exp_model_prediction = exp_model.predict(get_exp_params(x, y, w, h, text2_img_og, text2_img, i))
-                exp_model_prediction = [[0, 0, 1, 0, 0]]
-                exp_prediction_string = "".join(['1' if (m == np.argmax(exp_model_prediction[0])) else '0' for m, num in
-                                                 enumerate(exp_model_prediction[0])])
-                exp_prediction = BINARY_MAP[exp_prediction_string]
-
-                # prediction = model.predict([processed_img, np.array([i])])
-                prediction_string = "".join([str(int(round(num, 0))) for num in model_prediction[0]])
-                if prediction_string == "00000":
-                    prediction_string = "".join(['1' if (m == np.argmax(model_prediction[0])) else '0' for m, num in
-                                                 enumerate(model_prediction[0])])
-
-                prediction = BINARY_MAP[prediction_string]
-                # print(f"prediction: {BINARY_MAP[prediction_string]}, {exp_prediction}")
+                # prediction = "name"
+                # exp_prediction = "name"
+                prediction = response_data["prediction"]
+                exp_prediction = response_data["exp_prediction"]
 
                 box_crop = 0
-                if prediction == "name" and i < 3:
+                if exp_prediction == "name" and i < 3:
                     name_img = copy.deepcopy(text2_img)
                     thresh = cv2.threshold(name_img, 160, 255, cv2.THRESH_BINARY_INV)[1]
-                    d_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
                     name_dilation = cv2.dilate(thresh, rect_kernel, iterations=2)
                     b_contours, b_hierarchy = cv2.findContours(name_dilation, cv2.RETR_EXTERNAL,
                                                                cv2.CHAIN_APPROX_NONE)
@@ -571,18 +591,21 @@ class Processor:
                     name_contours = [cv2.boundingRect(b_cont) for b_cont in b_contours]
                     box_contour = min(name_contours, key=lambda box: abs(box[2] - box[3]))
                     box_crop = box_contour[0] + box_contour[2]
-                    cv2.imwrite(f"text_processing/{file_name}/{score_name}/name_contours.jpg", c_img)
+                    cv2.imwrite(f"{self.out_folder}/score_{score_idx}/name_contours.jpg", c_img)
 
-                for t in txt_list:
-                    t_img = text_img_map[t]
-                    bound_img = t_img[y:y + h, x + box_crop:x + w]
+                print("Predicting Text Data")
+                for t in self.TEXT_LIST:
+                    if (y + h) >= img.shape[0]:
+                        bound_img = np.array(t_img[y:img.shape[0], x + box_crop:x + w + box_crop])
+                    else:
+                        bound_img = np.array(t_img[y:y + h, x + box_crop:x + w])
                     if i >= 3 or prediction in ['number']:
                         data = image_to_data(bound_img, lang="eng_best", config='--psm 10 --oem 3',
                                              output_type='dict')
                     else:
                         data = image_to_data(bound_img, lang="eng_best", config='--psm 12', output_type='dict')
                     dataframe = pd.DataFrame(data)
-                    # print(dataframe)
+
                     dataframe['conf'] = dataframe['conf'].astype(int)
                     lines = dataframe.groupby('block_num')['text'].apply(list)
                     line = max(lines, key=lambda l: len("".join([s for s in l if s != ''])))
@@ -592,7 +615,7 @@ class Processor:
                     conf_df = dataframe.groupby(['block_num', 'conf'])['text'].apply(list)
                     # print(conf_df)
                     conf_keys = [k for k in conf_df[block_num].keys() if k != -1]
-                    conf_string = "".join(flatten([conf_df[block_num][k] for k in conf_keys]))
+                    conf_string = "".join(Processor.flatten([conf_df[block_num][k] for k in conf_keys]))
                     if len(conf_keys) > 0:
                         conf_val = max(conf_keys)
                     else:
@@ -605,16 +628,17 @@ class Processor:
 
                 rows[i].append(prediction)
                 rows[i].append(exp_prediction)
-                cv2.imwrite(f"text_processing/{file_name}/{score_name}/text_{file_name}_{score_idx}_{i}.jpg",
-                            text2_img)
+                # cv2.imwrite(f"text_processing/{file_name}/{score_name}/text_{file_name}_{score_idx}_{i}.jpg",
+                #            text2_img)
                 i += 1
 
-            writer.writerows(rows)
+            text_writer.writerows(rows)
             conf_writer.writerows(conf_table)
             finish = time.time()
 
             score_dict = {
                 "order": score_idx,
+                "deleted": []
             }
             d_keys = ["name", "score", "kills", "assists", "deaths"]
             for key in d_keys:
@@ -650,39 +674,41 @@ class Processor:
 
             for final_idx, key in enumerate(d_keys):
                 r_idx = final_idx + 1
-                print(rows[r_idx])
-                print(conf_table[r_idx])
-                alternatives = sorted([(val, conf_table[r_idx][i + 1]) for i, val in enumerate(rows[r_idx][1:5]) if
-                                       str(val) and i != 3], key=lambda x: x[1], reverse=True)
-                if final_idx > 1:
-                    digit_alternatives = sorted(
-                        [(int(val), conf_table[r_idx][i + 1]) for i, val in enumerate(rows[r_idx][1:5]) if
-                         str.isdigit(str(val)) and i != 3], key=lambda x: x[1], reverse=True)
-                    if str.isdigit(rows[r_idx][2]):
-                        score_dict[key]["value"] = (int(rows[r_idx][2]), conf_table[r_idx][2])
-                        score_dict[key]["alternatives"] = digit_alternatives[:2]
+                if r_idx < len(rows):
+                    print(rows[r_idx])
+                    print(conf_table[r_idx])
+                    alternatives = sorted([(val, conf_table[r_idx][i + 1]) for i, val in enumerate(rows[r_idx][1:5]) if
+                                           str(val) and i != 3], key=lambda x: x[1], reverse=True)
+                    if final_idx > 1:
+                        digit_alternatives = sorted(
+                            [(int(val), conf_table[r_idx][i + 1]) for i, val in enumerate(rows[r_idx][1:5]) if
+                             str.isdigit(str(val)) and i != 3], key=lambda x: x[1], reverse=True)
+                        if str.isdigit(rows[r_idx][2]):
+                            score_dict[key]["value"] = (int(rows[r_idx][2]), conf_table[r_idx][2])
+                            score_dict[key]["alternatives"] = digit_alternatives[:2]
+                        else:
+                            convert_attempt = sorted(
+                                [(convert_val(v[0]), v[1]) for v in alternatives if type(convert_val(v)) == 0],
+                                key=lambda x: x[1], reverse=True)
+
+                            if len(convert_attempt) > 0:
+                                score_dict[key]["value"] = convert_attempt[0][0]
+
+                    if len(alternatives) > 0:
+                        if not score_dict[key]["value"]:
+                            score_dict[key]["value"] = alternatives[:1]
+                        score_dict[key]["alternatives"] = alternatives[1:3]
                     else:
-                        convert_attempt = sorted(
-                            [(convert_val(v[0]), v[1]) for v in alternatives if type(convert_val(v)) == 0],
-                            key=lambda x: x[1], reverse=True)
-
-                        if len(convert_attempt) > 0:
-                            score_dict[key]["value"] = convert_attempt[0][0]
-
-                if len(alternatives) > 0:
-                    if not score_dict[key]["value"]:
-                        score_dict[key]["value"] = alternatives[:1]
-                    score_dict[key]["alternatives"] = alternatives[1:3]
-                else:
-                    score_dict[key]["value"] = ("-", -1)
+                        score_dict[key]["value"] = ("-", -1)
 
                 # Remove duplicates
-                score_dict[key]["alternatives"] = [score_dict[key]["alternatives"][p] for p in
-                                                   score_dict[key]["alternatives"] if
-                                                   str(score_dict[key]["alternatives"][p][0]) != str(
-                                                       score_dict[key]["value"][0])]
+                # score_dict[key]["alternatives"] = [score_dict[key]["alternatives"][p] for p in
+                #                                   score_dict[key]["alternatives"] if
+                #                                   str(score_dict[key]["alternatives"][p][0]) != str(
+                #                                       score_dict[key]["value"][0])]
+            score_dict["deleted"] = delete_rows
             print(f"{score_name} took {finish - start:.2f}s")
-            return score_dict
+            return json.dumps(score_dict)
 
     @staticmethod
     def clean_edge_cases(image):
@@ -696,3 +722,25 @@ class Processor:
         if any((len([r for r in row if r < 127]) / image.shape[1]) > 0.25 for row in rows):
             crop_y = 3
         return crop_y
+
+    @staticmethod
+    def get_exp_params(x, y, w, h, file_, sub_img, seq):
+        file_h, file_w = file_.shape
+
+        pixels = sub_img.shape[0] * sub_img.shape[1]
+        non_zero = cv2.countNonZero(sub_img)
+        ratio = 1 - (non_zero / pixels)
+
+        x_ratio = (x / file_w)
+        w_ratio = (w / file_w)
+        y_ratio = (y / file_h)
+        h_ratio = (y / file_h)
+        return np.array([x_ratio, y_ratio, w_ratio, h_ratio, ratio, seq])
+
+    @staticmethod
+    def flatten(S):
+        if S == []:
+            return S
+        if isinstance(S[0], list):
+            return Processor.flatten(S[0]) + Processor.flatten(S[1:])
+        return S[:1] + Processor.flatten(S[1:])

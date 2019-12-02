@@ -11,7 +11,7 @@ import csv
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 from funcs import flatten
-from filtering.functions import resize_image  # load_model
+from filtering.functions import resize_image, load_model
 from filtering.constants import IMAGE_WIDTH, IMAGE_HEIGHT
 import concurrent.futures
 import pickle
@@ -28,10 +28,10 @@ def get_exp_params(x, y, w, h, file_, sub_img, seq):
     w_ratio = (w / file_w)
     y_ratio = (y / file_h)
     h_ratio = (y / file_h)
-    return np.array([x_ratio, y_ratio, w_ratio, h_ratio, ratio, seq]).reshape([-1, 6, 1])
+    return np.array([x_ratio, y_ratio, w_ratio, h_ratio, ratio, seq]).reshape(-1, 6, 1)
 
 
-for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sample/"):  # ['frame_467.jpg']:
+for file in ['frame.jpg']:  # os.listdir("sample/"):   #   # os.listdir("sample/"):  # ['frame_467.jpg']:
     file_name = file.split('.')[0]
     folder_dir = f"proc_out/{file_name}"
     out_dir = f"text_processing/"
@@ -52,8 +52,8 @@ for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sam
     # for score_idx, score_img in enumerate(sorted(os.listdir(f"{folder_dir}/scorelines/text2"))):
 
     def process_scoreline(score_idx):
-        # model = load_model()
-        # exp_model = load_model(model_name="exp_model")
+        model = load_model()
+        exp_model = load_model(model_name="exp_model")
 
         LABEL_MAP = pickle.load(open("filtering/label_map.pkl", 'rb'))
         BINARY_MAP = pickle.load(open("filtering/binary_map.pkl", 'rb'))
@@ -72,7 +72,7 @@ for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sam
         empty_img.fill(255)
 
         img = 255 - img
-
+        print(f"Running Dilations Score index: {score_idx}... {score_img}")
         cv2.imwrite(f"text_processing/{file_name}/original_{score_img}", img)
         rect_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         dilation = cv2.dilate(img, rect_kernel, iterations=1)
@@ -83,6 +83,7 @@ for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sam
         crop_w = 0
         crop_y = 0
         if len(contours) == 1:
+            print("Attempting to Crop Image")
             # Crop operations...
             w_midpoint = img.shape[1] // 2
             h_midpoint = img.shape[0] // 2
@@ -111,6 +112,7 @@ for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sam
             contours, hierarchy = cv2.findContours(new_dilation.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
             print("New Contours: ", len(contours))
 
+        print(f"FINDING CONTOURS Score index: {score_idx}... {score_img}")
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
             cv2.rectangle(empty_img, (x, y), (x + w, y + h), (0, 255, 0), 1)
@@ -123,7 +125,7 @@ for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sam
         text_img = cv2.imread(f"{folder_dir}/scorelines/{EXTRACT_TEXT}/{score_img}")
 
         if crop_y != 0 or crop_w != 0:
-            print("cropxy")
+            print(f"cropping  Score index: {score_idx}... {score_img}")
             for tx in text_img_map:
                 tmp_img = text_img_map[tx]
                 text_img_map[tx] = tmp_img[0 + crop_y:tmp_img.shape[0], 0 + crop_w:tmp_img.shape[1]]
@@ -132,12 +134,14 @@ for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sam
         contours = sorted(contours, key=lambda x: cv2.boundingRect(x)[0])
         cv2.imwrite(f"text_processing/{file_name}/{score_name}/original.jpg", text_img)
 
+        headers = ['num', 'text1', 'text2', 'text3', 'text4', 'classification', "exp_classification"]
         rows = [headers, ]
         conf_table = [headers[:-2], ]
         of = open(f"text_processing/{file_name}/{score_name}/text.csv", 'w')
         cf = open(f"text_processing/{file_name}/{score_name}/conf.csv", 'w')
         writer = csv.writer(of)
         conf_writer = csv.writer(cf)
+        print(f"Contour Length: {len(contours)}")
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
             # width_counter[w] += 1
@@ -146,20 +150,19 @@ for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sam
                 rows.append([i, ])
                 conf_table.append([i, ])
                 text2_img_og = text_img_map['text2']
-                text2_img = text2_img_og[y:y + h, x:x + w]
+                if (y + h) > text2_img_og.shape[0] or (x + w) > text2_img_og.shape[1]:
+                    print("OUT OF BOUNDS ERROR")
+                    text2_img = text2_img_og[y:text2_img_og.shape[0], x:text2_img_og[1]]
+                else:
+                    text2_img = text2_img_og[y:y + h, x:x + w]
                 rsz = resize_image(text2_img)
-                np.savetxt("out2.txt", rsz)
                 processed_img = np.array(rsz).reshape(-1, IMAGE_HEIGHT, IMAGE_WIDTH, 1)
 
-                print(processed_img[0])
+                model_prediction = model.predict(processed_img)
+                # model_prediction = [[0, 0, 1, 0, 0]]
 
-                print(processed_img)
-                print(processed_img.shape)
-                # model_prediction = model.predict(processed_img)
-                model_prediction = [[0, 0, 1, 0, 0]]
-
-                # exp_model_prediction = exp_model.predict(get_exp_params(x, y, w, h, text2_img_og, text2_img, i))
-                exp_model_prediction = [[0, 0, 1, 0, 0]]
+                exp_model_prediction = exp_model.predict(get_exp_params(x, y, w, h, text2_img_og, text2_img, i))
+                # exp_model_prediction = [[0, 0, 1, 0, 0]]
                 exp_prediction_string = "".join(['1' if (m == np.argmax(exp_model_prediction[0])) else '0' for m, num in
                                                  enumerate(exp_model_prediction[0])])
                 exp_prediction = BINARY_MAP[exp_prediction_string]
@@ -174,7 +177,7 @@ for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sam
                 # print(f"prediction: {BINARY_MAP[prediction_string]}, {exp_prediction}")
 
                 box_crop = 0
-                if prediction == "name" and i < 3:
+                if exp_prediction == "name" and i < 3:
                     name_img = copy.deepcopy(text2_img)
                     thresh = cv2.threshold(name_img, 160, 255, cv2.THRESH_BINARY_INV)[1]
                     d_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
@@ -190,10 +193,13 @@ for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sam
 
                 for t in txt_list:
                     t_img = text_img_map[t]
-                    bound_img = t_img[y:y + h, x + box_crop:x + w]
+                    print(t_img.shape, (y + h), (x + w))
+                    if (y + h) >= img.shape[0]:
+                        bound_img = np.array(t_img[y:img.shape[0], x + box_crop:x + w + box_crop])
+                    else:
+                        bound_img = np.array(t_img[y:y + h, x + box_crop:x + w])
                     if i >= 3 or prediction in ['number']:
-                        data = image_to_data(bound_img, lang="eng_best", config='--psm 10 --oem 3',
-                                             output_type='dict')
+                        data = image_to_data(bound_img, lang="eng_best", config='--psm 10 --oem 3', output_type='dict')
                     else:
                         data = image_to_data(bound_img, lang="eng_best", config='--psm 12', output_type='dict')
                     dataframe = pd.DataFrame(data)
@@ -246,6 +252,8 @@ for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sam
             elif rows[r][-1] == "icon" and rows[r][-2] == rows[r][-1]:
                 # print(f"Icon Detected... skipping row: {r}")
                 pop_idx[r] = "Icon"
+            elif len("".join(rows[r][1:5])) == "" and -1 in conf_table[r]:
+                pop_idx[r] = "Blank Element"
             elif (len("".join(rows[r][1:5])) <= 8 and (
                     rows[r][5] == "number" and rows[r][6] in ['icon', 'number']) and r < 4) or sum(
                 conf_table[r][1:5]) == -4:
@@ -292,10 +300,10 @@ for file in ['capture2.jpg/']:  # os.listdir("sample/"):   #   # os.listdir("sam
                 score_dict[key]["value"] = ("-", -1)
 
             # Remove duplicates
-            score_dict[key]["alternatives"] = [score_dict[key]["alternatives"][p] for p in
-                                               score_dict[key]["alternatives"] if
-                                               str(score_dict[key]["alternatives"][p][0]) != str(
-                                                   score_dict[key]["value"][0])]
+            # score_dict[key]["alternatives"] = [score_dict[key]["alternatives"][p] for p in
+            #                                   score_dict[key]["alternatives"] if
+            #                                   str(score_dict[key]["alternatives"][p][0]) != str(
+            #                                       score_dict[key]["value"][0])]
         print(f"{score_name} took {finish - start:.2f}s")
         return score_dict
 
