@@ -18,5 +18,8 @@ pyserver/data
 */venv
 venv
 
+__pycache__
+*/__pycache__
+*.pyc
 redis.go
 tensor.go
