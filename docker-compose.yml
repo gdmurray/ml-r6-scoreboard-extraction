@@ -1,0 +1,38 @@
+version: '3.3'
+
+services:
+  goserver:
+    build:
+      context: ./goserver
+    ports:
+      - "8080:8080"
+    links:
+      - redis
+    volumes:
+      - ./goserver/models:/models
+    networks:
+      - backend
+  pyserver:
+    build:
+      context: ./pyserver
+    ports:
+      - "5000:5000"
+    expose:
+      - 5000
+    links:
+      - redis
+    networks:
+      - backend
+    depends_on:
+      - redis
+  redis:
+    image: "redis:alpine"
+    restart: unless-stopped
+    ports:
+      - 6379:6379
+    expose:
+      - 6379
+    networks:
+      - backend
+networks:
+  backend:

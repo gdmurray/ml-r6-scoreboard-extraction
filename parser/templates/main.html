@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+    <h1></h1>
+    <ul>
+        {% for key, value in data.items() %}
+        <li><a href="/data/{{ key }}">{{ value }}</a></li>
+        {% endfor %}
+    </ul>
+</body>
+</html>

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Process Data</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.3.1/js/bootstrap.min.js"
+            integrity="sha256-CjSoeELFOcH0/uxWu6mC/Vlrc1AARqbm/jiiImDGV3s=" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.3.1/css/bootstrap.min.css"
+          integrity="sha256-YLGeXaapI0/5IgZopewRJcFXomhRMlYYjugPLSyNjTY=" crossorigin="anonymous"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/core.js"
+            integrity="sha256-36hEPcG8mKookfvUVvEqRkpdYV1unP6wvxIqbgdeVhk=" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.js"
+            integrity="sha256-WpOohJOqMqqyKL9FccASB9O0KwACQJpFTUBLTYOVvVU=" crossorigin="anonymous"></script>
+</head>
+<body>
+<style>
+    .row{
+        margin-bottom: 10px !important;
+        border-bottom: 1px solid gray;
+    }
+</style>
+<script>
+    var scoreboard_images = [];
+    let num_images = {{ num_items }};
+    let folder = "{{ folder_ }}";
+    function predict(image_id) {
+            $.get(`/predict/${folder}/${image_id}`, function (data) {
+                var elem = `<div class="row"> \
+                                  <div class="col"> \
+                                   <img width="350" src=${data.image_path} /> \
+                                  </div> \
+                                   <div class="col"> \
+                                        <h5>${data.image_name}</h5> \
+                                        <h4>${data.prediction}</h4><br><br> \
+                                    </div \
+                                </div> <br><hr><br>`;
+                $('#results-div').append(elem);
+                 var prog = Math.round(((data.image_num/num_images)*100)).toString();
+                 console.log(prog);
+                $('#progress-bar').attr('value', prog );
+                if (data.next){
+                    predict(data.next);
+                }else{
+
+                }
+
+            })
+    }
+    function start_prediction() {
+        predict(0);
+    }
+</script>
+<h3>In Folder: {{ folder }}</h3>
+<h5>Found {{ num_items }} Images...</h5>
+<progress id="progress-bar" max="100" value="0"></progress>
+<button onclick="start_prediction()">Click here to start prediction</button>
+
+<div id="results-div">
+
+</div>
+</body>
+</html>

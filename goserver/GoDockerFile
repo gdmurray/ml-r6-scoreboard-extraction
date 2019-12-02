@@ -1,0 +1,37 @@
+FROM ctava/tfcgo
+RUN apt-get update
+RUN apt-get install -y build-essential apt-utils
+
+RUN apt-get install -y cmake git libgtk2.0-dev pkg-config libavcodec-dev \
+    libavformat-dev libswscale-dev unzip wget libtesseract-dev libleptonica-dev
+
+RUN  apt-get update && apt-get install -y python-dev python-numpy \
+  python3 python3-pip python3-dev libtbb2 libtbb-dev \
+  libjpeg62 libjpeg62-dev libjasper-dev libdc1394-22-dev \
+  python-opencv libopencv-dev libav-tools python-pycurl \
+  libatlas-base-dev gfortran webp qt5-default libvtk6-dev zlib1g-dev
+
+ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr
+RUN wget -O eng.traineddata https://github.com/tesseract-ocr/tessdata_best/raw/master/eng.traineddata &&\
+    mv eng.traineddata /usr/share/tesseract-ocr
+RUN pip3 install numpy
+
+RUN apt-get install -y python-pip
+RUN pip install --upgrade pip
+
+#RUN cd ~/ &&\
+#    wget -O opencv.zip https://github.com/opencv/opencv/archive/4.1.2.zip &&\
+#    wget -O ppencv_contrib.zip ttps://github.com/opencv/opencv_contrib/archive/4.1.2.zip &&\
+#    unzip opencv.zip -d opencv &&\
+#    unzip opencv_contrib.zip -d opencv_contrib &&\
+#    cd opencv && mkdir build && cd build && cmake  -DWITH_QT=ON -DWITH_OPENGL=ON -DFORCE_VTK=ON -DWITH_TBB=ON -DWITH_GDAL=ON -DWITH_XINE=ON -DBUILD_EXAMPLES=ON .. && \
+#    make -j4 && make install && ldconfig
+
+RUN go get -u -d gocv.io/x/gocv
+RUN cd $GOPATH/src/gocv.io/x/gocv &&\
+    make install
+RUN go get -t github.com/otiai10/gosseract
+RUN go get github.com/galeone/tfgo
+RUN export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
+RUN go get github.com/gomodule/redigo/redis
+RUN go get github.com/gorilla/mux
